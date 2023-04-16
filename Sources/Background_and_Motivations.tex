@@ -4,21 +4,120 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{GNN Background}
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Given a graph containing nodes, edges, and features, GNNs output an embedding for each node in the graph. 
+An embedding is a $d$-dimensional representation of the aggregated feature information from a node's neighborhood. 
+Depending on the learning task, similarity in the embedding space can represent different things, such as similarity of node type (node classification task) or likelihood of edge existence (link prediction task) [todo cite]. 
+
+In this work we will consider the case where graphs are homogeneous (one node type) and only nodes have associated features.
+
+Borrowing notation from P3 \cite{P3_2021}, we can generally represent the embedding for a node $v$ at layer $k$ as $h_v^k$, where
+\begin{align} \label{GNN Equation}
+    h_v^k = \sigma \left(
+         W^k \cdot 
+         \mathtt{COMBINE}^{(k)} \left(
+            h_v^{k-1},
+            \mathtt{AGG}^{(k)} \left( 
+                    \{ h_u^{k-1} \mid u \in N(v) \}
+                \right) 
+         \right)
+     \right)
+\end{align}
+\begin{align*}
+    \sigma &= \text{Nonlinear function} \\
+    W^k &= \text{Trainable weight matrix for layer $k$} \\
+    N(v) &= \text{Neighborhood of node v}
+\end{align*}
+$\mathtt{AGG}^(k)$ is a function that aggregates the last layer embeddings of a node's neighborhood. $\mathtt{COMBINE}^(k)$ is a function that combines that the aggregated neighborhood embeddings with the node's own last layer embedding. The first layer embedding for a node v, $h_k^0$, is just the original features of that node.
+
+Since for each layer there is a different $W^k$, GNNs are comprised of $k$ neural networks. Generally GNNs use 1-5 layers, with 2 layers being fairly standard \cite{Survey_First_2022}. However, some architectures can use significantly more layers, such as the current SOTA EnGCN model comprising 8 layers \cite{EnGCN_2023}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{GNN Training Challenges}
+\subsection{GNN Inference Task}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+In this work we look at GNN inference as a \textit{online} problem, where given a request comprising a new node (or batch of nodes), its features, and edges connecting into the existing graph, the GNN needs to compute the embedding for the new node. 
+This is as opposed to traditional \textit{offline}, full-graph inference, where inference is performed on all nodes in the existing graph, usually for training evaluation purposes or for saving embeddings for later retrieval. 
+The online inference formulation has many uses depending on domain. 
+For example, in a social network graph, an inference request can correspond to computing the embedding for a new user. 
+Additionally, this formulation naturally works with temporal graphs, where features or graph structures change over time. 
+For example, an inference request could contain the node id and edges of an existing node in the graph, but contain a new feature vector. 
+Thus our online inference formulation can capture time-evolving behaviors of both graph structure and graph features.
+
+Our system currently does not combine new inference requests into the existing graph or retrain the model to accommodate for new requests. 
+Instead, we look specifically at the \textit{computation} aspect, understanding how to efficiently compute a new embedding. 
+Modifying the existing graph and dealing with challenges such as consistency are outside the scope of this work, but would be an interesting and natural extension.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{GNN Computation Challenges}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ 
+The process for performing a GNN forward pass is roughly as follows. Assuming graph structure and  features fit in a single machine's CPU memory, if we want to compute the embedding for a set of \textit{target} nodes:
+
+\begin{enumerate}
+    \item \textbf{Sampling:} Construct $k$-hop neighborhood for target nodes and build logical computation graph describing GNN computation.
+    \item \textbf{Feature gather:} Gather node features corresponding to $k$-hop neighborhood in contiguous CPU buffer/
+    \item \textbf{CPU-GPU copy:} Copy buffer with node features and computation graph to GPU.
+    \item \textbf{Model execution:} Perform GNN computation on GPU.
+\end{enumerate}
+
+Figure \ref{Basic System Diagram} shows how these steps would be executed on a baseline system. In a training setting the set of target nodes would be a minibatch, and the model execution step would include backpropagation. In the inference settings, the set of target nodes come from an inference requests, and the model execution step only includes the forward pass.
+
+\begin{figure}[h!]
+    \centering
+    % \includegraphics[width=\textwidth]{stamp_graphs.png}
+    
+    \caption{[todo add picture of strawman GNN inference system]}
+    \label{Basic System Diagram}
+\end{figure}    
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Neighborhood Explosion Problem}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The need to recursively build node neighborhoods for GNN execution means that GNNs suffer from a \textit{neighborhood explosion} problem. As the number of GNN layers increase, the amount of nodes needed in the first layer increase exponentially. This leads 
+
+To combat this, many GNN training systems and models leverage \textit{neighborhood sampling}, a technique where a fixed number or certain percentage of nodes are sampled at each layer \cite{GraphSAGE_2017} [todo other sampling works]. However, neighborhood sampling results in a drop in accuracy that may be unacceptable for some applications.
+
+
+
 Neihgborhood explosion
 Feature transfer size
 GPU Sampling
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{GNN Inference Bottlenecks}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+\begin{figure}[h!]
+    \centering
+    % \includegraphics[width=\textwidth]{stamp_graphs.png}
+    
+    \caption{[todo add graphs showing latency breakdown for different graphs ]}
+    \label{Baseline Latency Breakdown}
+\end{figure}    
+
+\begin{figure}[h!]
+    \centering
+    % \includegraphics[width=\textwidth]{stamp_graphs.png}
+    
+    \caption{[todo add graphs showing latency breakdown for different graphs ]}
+    \label{GPU Sampling Latency Breakdown}
+\end{figure}    
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Existing Caching Solutions}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Prior GNN training works have observed that both GPU compute and memory are underutilized while training. 
+As a result, node features can be cached in GPU memory so that they no longer need to be copied over from host memory, easing data loading bottlenecks.
+PaGraph \cite{PaGraph_2020} used this opportunity to introduce \textit{static feature caching}, proposing a policy where the features of the highest degree nodes in the graph are stored on the GPU prior to training. 
+GNNLab \cite{GNNLab_2022} extended this idea to include a "pre-sampling" phase, where warmup training epochs are run to determine what nodes are most often used and thus should be stored in the cache.
+BGL \cite{BGL_2023} introduces a dynamic FIFO cache and iterates over the graph in a roughly-BFS manner to exploit the FIFO cache.
 
+However, for inference, a system cannot constrain when requests come in or how requests connect to the existing graph. Therefore BGL's ordering based approach cannot be adapted to inference, while GNNLab's pre-sampling technique cannot be directly applied. However, GNNLab's pre-sampling technique provides the insight that a frequency based approach to identifying hot nodes is effective. We adapt this idea to create an online version that is suitable for inference, discussed in section [todo add a ref].
+
+\begin{figure}[h!]
+    \centering
+    % \includegraphics[width=\textwidth]{stamp_graphs.png}
+    
+    \caption{[todo add graphs showing latency breakdown for different graphs ]}
+    \label{Static Cache Latency Breakdown}
+\end{figure}    

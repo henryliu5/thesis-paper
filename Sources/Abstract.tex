@@ -5,8 +5,10 @@
 \noindent
 %
 
-Graph Neural Networks (GNNs) have gained significant popularity due to their execellent performance in many graph representation learning tasks. 
-This work investigates how GNN inference systems can respond to inference requests quickly without compromising prediction accuracy.
+Graph Neural Networks (GNNs) have gained significant popularity due to their excellent performance in many graph representation learning tasks. 
+Graphs used for GNN computation usually associate high-dimensional feature vectors with each node, which must be copied to the GPU for GNN execution.
+This work investigates how GNN inference systems can dynamically cache graph features in GPU memory to reduce request-response latencies.
+% can respond to inference requests quickly without compromising prediction accuracy.
 
 Existing GNN literature has identified that efficiently moving graph features to GPUs, known as data loading, is an important challenge at training time. 
 To reduce data loading overheads, state of the art GNN training systems statically cache graph features on the GPU.
@@ -14,4 +16,5 @@ We observe that the data loading problem is exacerbated at inference time and be
 
 In particular, we motivate the use of dynamic cache policies to exploit graph locality of inference requests and explore mechanisms to reduce the impact of dynamic cache overheads on latency and throughput. 
 Our system targets a single-machine, multi-GPU setting and performs cache updates asynchronously to remove cache update operations from the latency-sensitive request-response path.
-We then leverage interconnects such as NVLink to allow GPUs to share a single logical cache and propose a lock-free synchronization mechanism to reduce potential lock contention due to cache updates. 
+We show how a simple frequency-based cache admission and eviction policy can achieve better cache hit rates than existing static cache baselines.
+We then leverage interconnects such as NVLink to allow multiple GPUs to share a single logical cache and propose a lock-free synchronization mechanism to reduce lock contention due to cache updates. 
