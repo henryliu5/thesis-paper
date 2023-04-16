@@ -9,22 +9,56 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Frequency-based admission \& eviction policy}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-Neihgborhood explosion
-Feature transfer size
-GPU Sampling
 
+\begin{enumerate}
+    \item Counts are stored on GPU in 1 byte
+\end{enumerate}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Asynchronous cache update mechanisms}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+\begin{table}[h]
+    \begin{center}
+        \begin{tabular}{|c c c|} 
+        \hline
+        \textbf{Operation} & \textbf{Update Time (ms)} & \textbf{Percent of Update Time} \\ [0.5ex] 
+        \hline\hline
+        Compute most common features & 0.6 & 10\% \\
+        \hline
+        Feature copy & 2.2 & 38\% \\
+        \hline
+        Update cache metadata & 2.7 & 47\%  \\
+        \hline
+        Misc. (locking, device sync, etc.) & 0.2 & 3.5\% \\
+        \hline
+        Total & 5.7 & \\
+        \hline
+        \end{tabular}
+    \end{center}
+    \caption{Breakdown of time spent on operations when performing cache update.
+    These are the operations that contribute to significant tail latency with the prefetching policy.
+    }
+\end{table}
+
+
+\begin{enumerate}
+    \item Python process places torch tensor into queue, picked up by C++ thread
+    \item Removed from queue when model execution finishes to avoid ballooning memory usage
+    \item Also experimented with updating counts/doing other operations in C++ thread
+\end{enumerate}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Lock-free cache updates}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+With a fully saturated pipeline, can nearly fully block with locking and thus will lose any gains from asynchrony.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Multi-GPU cache sharing}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+\begin{enumerate}
+    \item Mention pinned memory buffer reused between requests, show pinned mem vs pagable mem graph
+    \item 
+\end{enumerate}
