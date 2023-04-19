@@ -9,7 +9,7 @@
 
 \LoadClass[a4paper,
            oneside,
-           11pt,
+           12pt,
            cleardoublepage=empty,
            numbers=noenddot,
            titlepage,

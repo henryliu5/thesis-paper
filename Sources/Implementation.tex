@@ -2,27 +2,63 @@
 \chapter{Implementation}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+Our system implements the same frequency-based admission and eviction policy from the prefetching baseline but combines it with an asynchronous cache update mechanism to reduce tail latencies. 
+Section \ref{Implementation: Policy} analyzes this policy in more detail and Section \ref{Implementation: Async Update} describes how asynchronous updates take place. 
+Since asynchronous updates synchronized using naive locking can produce blocking behaviors when pipelined (and thus no longer be truly asynchronous), we propose a lock-free mechanism to perform cache updates, discussed in Section \ref{Implementation: Lock-free}.
+Lastly, Section \ref{Implementation: Multi-GPU} describes how we extend our system to support multiple GPUs connected by NVLinks and share a single logical cache.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{System Overview}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+
+GPU sampling
+Feature gather pinned buffer
+Multi process service
+
+\begin{figure}[h!]
+    \centering
+    % \includegraphics[width=\textwidth]{stamp_graphs.png}
+    
+    \caption{[todo add picture of this system]}
+    \label{Our system diagram}
+\end{figure}    
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Frequency-based admission \& eviction policy}
+\section{Frequency-based admission \& eviction policy} \label{Implementation: Policy}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{enumerate}
-    \item Counts are stored on GPU in 1 byte
-\end{enumerate}
+Our system implements a cache admission and eviction policy that uses frequency as its only feature. The goal is simple: to admit the most frequent node features and evict the least frequent node features. This is the policy used by the prefetch update mechanism describes in Section [todo ref baseline], and we elaborate on the implementation here.
+
+Node frequencies are tracked in a buffer in GPU memory. By tracking frequencies on the GPU rather than the host, our system avoids an additional device to host copy, since computation graphs are built on GPU. The frequency buffer has length equal to the number of nodes in the graph.
+Each index in the buffer corresponds to a node, and the value is a counter that gets incremented whenever the node's feature is required.
+To reduce memory usage, this buffer uses only one byte for each node. 
+However, the size of the buffer still scales with the number of nodes in the graph. We note that frequencies can also be tracked using a probabilistic data structure like a counting bloom filter or count-min sketch, but we do not implement this.
+Using such a probabilistic data structure actually makes it easier to add new nodes into the graph, since there is no buffer that needs to be resized.
+We leave this as future work.
+
+To capture changes in node frequencies, the count buffer must decay over time.
+This is implemented by periodically dividing all counts in the buffer by two, a technique adapted from TinyLFU \cite{TinyLFU_2014} which produces exponential decay.
+A nice property of exponential decay is that it is easy to bound the maximum possible count and fit it within the one byte constraint. 
+Additionally, the decay can be implemented as a bit shift for better performance and still works with a count-min sketch or counting bloom filter.
+
+There are many policy choices regarding how exactly to choose which nodes to evict or admit. 
+For example, a policy could weight both a node's degree as well as its recent frequency when making admission decisions. 
+he weighting of node degree versus frequency is a user-adjustable knob in our system, but for the evaluation in Section \ref{Evaluation}, we use only frequency when evaluating frequency-based approaches.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Asynchronous cache update mechanisms}
+\section{Asynchronous cache update mechanism} \label{Implementation: Async Update}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+ 
+To eliminate tail latencies associated with the prefetching baseline, our system 
 \begin{table}[h]
     \begin{center}
+        \textbf{Breakdown of Cache Update Overhead}
         \begin{tabular}{|c c c|} 
         \hline
-        \textbf{Operation} & \textbf{Update Time (ms)} & \textbf{Percent of Update Time} \\ [0.5ex] 
+        \textbf{Operation} & \textbf{Time (ms)} & \textbf{Percent of Update Time} \\ [0.5ex] 
         \hline\hline
         Compute most common features & 0.6 & 10\% \\
         \hline
@@ -39,23 +75,43 @@
     \caption{Breakdown of time spent on operations when performing cache update.
     These are the operations that contribute to significant tail latency with the prefetching policy.
     }
+    \label{Update latencies}
 \end{table}
 
-
 \begin{enumerate}
+    \item Compute set of cache candidates
     \item Python process places torch tensor into queue, picked up by C++ thread
     \item Removed from queue when model execution finishes to avoid ballooning memory usage
     \item Also experimented with updating counts/doing other operations in C++ thread
 \end{enumerate}
 
+\subsection{Computing Cache Candidates}
+
+\subsection{Performing Cache Updates}
+Lower priority CUDA stream than model forward pass
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Lock-free cache updates}
+\section{Lock-free cache updates} \label{Implementation: Lock-free}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Asynchronous cache updates naturally raise concerns about correctness and performance due to concurrency. While naive locking may initially be adequate, at scale this may not be the case. In this section we look at a lock-free algorithm to avoid lock contention in large systems.
+
+Consider the case where we would like our system to be pipelined to maximize throughput. 
 With a fully saturated pipeline, can nearly fully block with locking and thus will lose any gains from asynchrony.
+Figure \ref{Impl: Contended pipeline} illustrates how blocking can erode throughput gains from pipelining.
+
+\begin{figure}[h!]
+    \centering
+    % \includegraphics[width=\textwidth]{stamp_graphs.png}
+    
+    \caption{[todo Lock conflict p99 latency]}
+    \label{Impl: Contended pipeline}
+\end{figure}    
+
+From the perspective of a single GPU,
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Multi-GPU cache sharing}
+\section{Multi-GPU cache sharing} \label{Implementation: Multi-GPU}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{enumerate}
