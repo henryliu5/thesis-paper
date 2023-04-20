@@ -1,5 +1,5 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Background and Motivation}
+\chapter{Background}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -58,9 +58,7 @@ Figure \ref{Background: GNN Execution Example} illustrates the construction of a
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Online GNN Inference}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\subsection{Online vs. Offline Inference}
-Traditionally, inference is viewed as an \textit{offline} problem, where inference is performed on all nodes in the graph (full graph inference).
+Traditionally, GNN inference has been viewed as an \textit{offline} problem, where inference is performed on all nodes in the graph (full graph inference).
 Full graph inference is typically used for evaluating trained models or computing node embeddings for future lookup. 
 For example, PinSage \cite{Recsys_PinSAGE_2018} first uses MapReduce \cite{MapReduce_2004} to perform full graph inference before storing all node embeddings in a database.
 Then, PinSage uses $K$-nearest neighbors to compute embeddings for new queries, enabling it to serve online recommendation requests.
@@ -68,30 +66,23 @@ However, this approach, along with other nearest neighbor approaches, suffers fr
 
 Therefore, in this work we will view GNN inference as a \textit{online} problem, where a GNN is given a request to compute an embedding for a node or batch of nodes. In this setting, the GNN must respond to requests that consist of new nodes, their features, and edges connecting them into the existing graph.
 
+In this section we motivate the online inference formulation and examine how it relates to existing mini-batch training work.
+
 \subsection{Online Inference Applications}
-The online inference formulation is flexible and has applications in many domains.
+Online inference has many applications depending on domain.
 For example, in a social network graph, an inference request can correspond to computing the embedding for a new user or recomputing embeddings as a result of a new friendship. 
 Furthermore, there is no strict requirement that a node is truly "new", meaning that an inference request could correspond to an update of node features.
 For example, in a traffic forecasting application, an inference request can be an update of node features that represent a change in traffic conditions.
 
-\subsection{Limitations}
-[TODO move this elsewhere]
-Our system currently does not combine new inference requests into the existing graph or retrain the GNN to accommodate for new requests. 
-Instead, we look only at GNN computation and investigate how to efficiently compute new embeddings. 
-Integrating new nodes into the existing graph and dealing with challenges such as consistency are both orthogonal and out of scope of this work, but would be an interesting and natural extension.
+\subsection{Online Inference vs. Mini-batch Training}
+% The standard stages for executing GNN inference are as follows. These stages are the same as for mini-batch training minus any backpropagation steps. Assuming graph structure and features fit in a single machine's host memory, there are four steps to compute the embeddings of a set of \textit{target} nodes.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{GNN Inference Challenges}
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Although online GNN inference has unique challenges, it shares many similarities with GNN mini-batch training.
+% In this section we detail the necessary steps for GNN inference, explore optimizations borrowed from GNN training, and identify opportunities for improvement.
 
-Although online GNN inference has unique challenges, it shares many similarities with GNN mini-batch training.
-In this section we detail the necessary steps for GNN inference, explore optimizations borrowed from GNN training, and identify opportunities for improvement.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsection{GNN Inference Execution} 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-The standard stages for executing GNN inference are as follows. These stages are the same as for mini-batch training minus any backpropagation steps. Assuming graph structure and features fit in a single machine's host memory, there are four steps to compute the embeddings of a set of \textit{target} nodes.
-
+While online GNN inference is generally understudied, it shares many similarities with GNN mini-batch training. 
+Mini-batch training is a popular technique for GNN training on large graphs where embeddings are only computed for a randomly select subset of the graph per epoch \cite{BGL_2023}. 
+Aside from differences in high-level goals, the main difference between the inference and training case is that no backpropagation is needed for inference. Thus when understanding the steps required to perform GNN inference, we use established taxonomy from mini-batch training works \cite{PaGraph_2020}\cite{GNNLab_2022}\cite{P3_2021}. We break down the stages of an online GNN inference system as follows:
 \begin{enumerate}
     \item \textbf{Sampling:} Construct $k$-hop neighborhood for target nodes and build logical computation graph describing GNN computation.
     \item \textbf{Data Loading:}
@@ -102,6 +93,8 @@ The standard stages for executing GNN inference are as follows. These stages are
     \item \textbf{Model execution:} Perform GNN computation on GPU.
 \end{enumerate}
 
+Figure \ref{Compute Visualization} visualizes these steps. GNN training systems have developed many optimizations for these stages.
+
 \begin{figure}[h!!!]
     \centering
     \includegraphics[width=\textwidth]{figures/Compute example.png}
@@ -110,75 +103,29 @@ The standard stages for executing GNN inference are as follows. These stages are
     \label{Compute Visualization}
 \end{figure}    
 
-Figure \ref{Compute Visualization} illustrates these stages. Prior work has looked at optimizing these stages in various ways.
+
+\subsubsection{Sampling Optimizations}
 For example, \textit{neighborhood sampling} reduces or avoids the exponential explosion in neighborhood size by randomly selecting a fixed number or percentage of node neighbors during the sampling stage \cite{GraphSAGE_2017}. 
 However, since this can produce a drop in accuracy, works such as NextDoor \cite{NextDoor_2021} have proposed performing sampling on GPU rather than CPU, yielding significant speedups.
 
 We are particularly interested in works that target the data loading stage, since movement of features from host memory to GPU memory can easily be bottlenecked by PCIe bandwidth.
+A key innovation in GNN training has been caching node features in GPU memory so they no longer need to be copied over from host memory, easing data loading bottlenecks. We give a detailed treatment of three relevant works, \textbf{PaGraph}, \textbf{GNNLab}, and \textbf{BGL}.
+
+\subsubsection{GPU Feature Caches}
 
 Prior GNN training works have observed that both GPU compute and memory are underutilized while training. 
-As a result, node features can be cached in GPU memory so that they no longer need to be copied over from host memory, easing data loading bottlenecks.
-PaGraph \cite{PaGraph_2020} used this opportunity to introduce \textit{static feature caching}, proposing a policy where the features of the highest degree nodes in the graph are stored on the GPU prior to training. 
-GNNLab \cite{GNNLab_2022} extends static caching to include a "pre-sampling" phase, where warmup training epochs are run to determine what nodes are most often used and thus should be stored in the cache.
-BGL \cite{BGL_2023} introduces a dynamic FIFO cache and iterates over the graph in a roughly-BFS manner to exploit the FIFO cache.
+\textbf{PaGraph} \cite{PaGraph_2020} used this opportunity to introduce \textit{static feature caching}, proposing a policy where the features of the highest degree nodes in the graph are stored on the GPU prior to training. 
+\textbf{GNNLab} \cite{GNNLab_2022} extends static caching to include a "pre-sampling" phase, where warmup training epochs are run to determine what nodes are most often used and thus should be stored in the cache.
+\textbf{BGL} \cite{BGL_2023} introduces a dynamic FIFO cache and iterates over the graph in a roughly-BFS manner to exploit the FIFO cache.
 
-However, for inference, a system can neither constrain when requests are handled nor where they reside in the graph structure. Therefore BGL's ordering based approach cannot be adapted to inference. While GNNLab's pre-sampling technique cannot be directly applied, the pre-sampling technique provides insight that a frequency based approach to identifying hot nodes is effective. We adapt this idea to create an online version that is suitable for inference, discussed in section [todo add a ref].
+However, for inference, a system can neither constrain when requests are handled nor where they reside in the graph structure. Therefore BGL's ordering based approach cannot be adapted to inference. While GNNLab's pre-sampling technique cannot be directly applied, the pre-sampling technique provides insight that a frequency based approach to identifying hot nodes is effective.
+
+We adapt this idea to create an online version that is suitable for inference, discussed in section [todo add a ref].
+
+
 % Since this work's contributions primarily optimize the \textbf{data loading} stage, we give prior work targeting this stage a detailed treatment in Section \ref{Background: Data loading prior work}.
 
 % The \textbf{feature gather} and \textbf{CPU-GPU copy} stages comprise the \textit{data loading} step, which is the general process of moving features to the GPU.
 
-
-
 % In a training setting the set of target nodes would be a minibatch, and the model execution step would include backpropagation. 
 % In the inference setting, the set of target nodes come from inference requests, and the model execution step only includes the forward pass.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsection{Prior Data Loading Optimizations} \label{Background: Data loading prior work}
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsubsection{Prior Data Loading Optimizations}
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% \subsection{Neighborhood Explosion Problem}
-% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% The need to recursively build node neighborhoods for GNN execution means that GNNs suffer from a \textit{neighborhood explosion} problem. As the number of GNN layers increase, the amount of nodes needed in the first layer increase exponentially. This leads 
-
-% To combat this, many GNN training systems and models leverage \textit{neighborhood sampling}, a technique where a fixed number or certain percentage of nodes are sampled at each layer \cite{GraphSAGE_2017} [todo other sampling works]. However, neighborhood sampling results in a drop in accuracy that may be unacceptable for some applications.
-
-% Neihgborhood explosion
-% Feature transfer size
-% GPU Sampling
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Overcoming Data Loading Bottlenecks}
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-
-\begin{figure}[h!]
-    \centering
-    % \includegraphics[width=\textwidth]{stamp_graphs.png}
-    
-    \caption{[todo add graphs showing latency breakdown for different graphs ]}
-    \label{Baseline Latency Breakdown}
-\end{figure}    
-
-\begin{figure}[h!]
-    \centering
-    \includegraphics[width=\textwidth]{figures/GCN_latency_breakdown_gpu_sampled_with_cache.png}
-    
-    \caption{[todo add graphs showing latency breakdown for different graphs ]}
-    \label{GPU Sampling Latency Breakdown}
-\end{figure}    
-
-
-\begin{figure}[h!]
-    \centering
-    % \includegraphics[width=\textwidth]{stamp_graphs.png}
-    
-    \caption{[todo add graphs showing latency breakdown for different graphs ]}
-    \label{Static Cache Latency Breakdown}
-\end{figure}    
