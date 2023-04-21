@@ -1,5 +1,5 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Background}
+\chapter{Background and Motivation}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -66,7 +66,7 @@ However, this approach, along with other nearest neighbor approaches, suffers fr
 
 Therefore, in this work we will view GNN inference as a \textit{online} problem, where a GNN is given a request to compute an embedding for a node or batch of nodes. In this setting, the GNN must respond to requests that consist of new nodes, their features, and edges connecting them into the existing graph.
 
-In this section we motivate the online inference formulation and examine how it relates to existing mini-batch training work.
+In this section we motivate the online inference formulation and present a concrete taxonomy of the stages of GNN inference.
 
 \subsection{Online Inference Applications}
 Online inference has many applications depending on domain.
@@ -74,29 +74,24 @@ For example, in a social network graph, an inference request can correspond to c
 Furthermore, there is no strict requirement that a node is truly "new", meaning that an inference request could correspond to an update of node features.
 For example, in a traffic forecasting application, an inference request can be an update of node features that represent a change in traffic conditions.
 
-\subsection{Online Inference vs. Mini-batch Training}
-% The standard stages for executing GNN inference are as follows. These stages are the same as for mini-batch training minus any backpropagation steps. Assuming graph structure and features fit in a single machine's host memory, there are four steps to compute the embeddings of a set of \textit{target} nodes.
+Facebook's social network graph in 2013 experienced roughly 86 thousand node or edge updates per second \cite{Graph_Survey_2020}. [todo put this in context]
 
-% Although online GNN inference has unique challenges, it shares many similarities with GNN mini-batch training.
-% In this section we detail the necessary steps for GNN inference, explore optimizations borrowed from GNN training, and identify opportunities for improvement.
+\subsection{GNN Inference Stages}
+While online GNN inference is generally understudied, it shares many similarities with GNN mini-batch training (discussed in Section \ref{Background: Relation to training}).
 
-While online GNN inference is generally understudied, it shares many similarities with GNN mini-batch training. 
-Mini-batch training is a popular technique for GNN training on large graphs where embeddings are only computed for a randomly select subset of the graph per epoch \cite{BGL_2023}. 
-Aside from differences in high-level goals, the main difference between the inference and training case is that no backpropagation is needed for inference. Thus when understanding the steps required to perform GNN inference, we use established taxonomy from mini-batch training works \cite{PaGraph_2020}\cite{GNNLab_2022}\cite{P3_2021}. We break down the stages of an online GNN inference system as follows:
-\begin{enumerate}
-    \item \textbf{Sampling:} Construct $k$-hop neighborhood for target nodes and build logical computation graph describing GNN computation.
-    \item \textbf{Data Loading:}
-    \begin{enumerate}
-        \item \textbf{Feature gather:} Gather node features corresponding to $k$-hop neighborhood in contiguous CPU buffer.
-        \item \textbf{CPU-GPU copy:} Copy buffer with node features and computation graph to GPU.
-    \end{enumerate}
-    \item \textbf{Model execution:} Perform GNN computation on GPU.
-\end{enumerate}
-
-Figure \ref{Compute Visualization} visualizes these steps. GNN training systems have developed many optimizations for these stages.
+Thus when understanding the steps required to perform GNN inference, we use established taxonomy from mini-batch training work \cite{PaGraph_2020}\cite{GNNLab_2022}\cite{P3_2021}. We break down the stages of GNN inference as follows:
 
 \begin{figure}[h!!!]
     \centering
+    \begin{enumerate}
+        \item \textbf{Sampling:} Construct $k$-hop neighborhood for target nodes and build logical computation graph describing GNN computation.
+        \item \textbf{Data Loading:} Moving necessary data to GPU, comprising two steps.
+        \begin{enumerate}
+            \item \textbf{Feature gather:} Gather node features corresponding to $k$-hop neighborhood in contiguous CPU buffer.
+            \item \textbf{CPU-GPU copy:} Copy buffer with node features and computation graph to GPU.
+        \end{enumerate}
+        \item \textbf{Model execution:} Perform GNN computation on GPU.
+    \end{enumerate}
     \includegraphics[width=\textwidth]{figures/Compute example.png}
     
     \caption{Online GNN Inference}
@@ -104,28 +99,56 @@ Figure \ref{Compute Visualization} visualizes these steps. GNN training systems 
 \end{figure}    
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Inference vs. Training} \label{Background: Relation to training}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+In this section we analyze similarities and differences between the inference and training tasks and examine the effectiveness of relevant GNN training optimizations at inference time.
+
+Mini-batch training is a popular technique for GNN training on large graphs where embeddings are only computed for a random subset of the graph per epoch \cite{BGL_2023}. 
+This is as opposed to full graph training, where the embeddings and gradients are computed for the entire graph at once, similar to full graph inference.
+Mini-batch training is analogous to online inference, and, aside from the high-level goal, the difference is that no backpropagation is needed for inference. We briefly look at prior optimizations for the sampling and data loading stages, with particular emphasis on the latter.
+
 \subsubsection{Sampling Optimizations}
 For example, \textit{neighborhood sampling} reduces or avoids the exponential explosion in neighborhood size by randomly selecting a fixed number or percentage of node neighbors during the sampling stage \cite{GraphSAGE_2017}. 
 However, since this can produce a drop in accuracy, works such as NextDoor \cite{NextDoor_2021} have proposed performing sampling on GPU rather than CPU, yielding significant speedups.
-
+\\ \\ 
 We are particularly interested in works that target the data loading stage, since movement of features from host memory to GPU memory can easily be bottlenecked by PCIe bandwidth.
 A key innovation in GNN training has been caching node features in GPU memory so they no longer need to be copied over from host memory, easing data loading bottlenecks. We give a detailed treatment of three relevant works, \textbf{PaGraph}, \textbf{GNNLab}, and \textbf{BGL}.
 
-\subsubsection{GPU Feature Caches}
+\subsubsection{Data Loading Optimizations}
 
 Prior GNN training works have observed that both GPU compute and memory are underutilized while training. 
 \textbf{PaGraph} \cite{PaGraph_2020} used this opportunity to introduce \textit{static feature caching}, proposing a policy where the features of the highest degree nodes in the graph are stored on the GPU prior to training. 
 \textbf{GNNLab} \cite{GNNLab_2022} extends static caching to include a "pre-sampling" phase, where warmup training epochs are run to determine what nodes are most often used and thus should be stored in the cache.
 \textbf{BGL} \cite{BGL_2023} introduces a dynamic FIFO cache and iterates over the graph in a roughly-BFS manner to exploit the FIFO cache.
+However, while these caching approaches work well for training, they are not all directly applicable to the inference case.
 
-However, for inference, a system can neither constrain when requests are handled nor where they reside in the graph structure. Therefore BGL's ordering based approach cannot be adapted to inference. While GNNLab's pre-sampling technique cannot be directly applied, the pre-sampling technique provides insight that a frequency based approach to identifying hot nodes is effective.
+% However, for inference, a system can neither constrain when requests are handled nor where they reside in the graph structure. Therefore BGL's ordering based approach cannot be adapted to inference. While GNNLab's pre-sampling technique cannot be directly applied, the pre-sampling technique provides insight that a frequency based approach to identifying hot nodes is effective.
 
-We adapt this idea to create an online version that is suitable for inference, discussed in section [todo add a ref].
+% We adapt this idea to create an online version that is suitable for inference, discussed in section [todo add a ref].
+
+\subsection{GNN Inference Challenges}
+Leveraging approaches from existing training systems present several key challenges, namely:
+
+\begin{enumerate}
+    \item \textbf{Latency is a key metric at inference time}. This is not the case during training. During training, throughput is a far more important metric than latency. For example, many training systems avoid data loading bottlenecks using pipelining. However, pipelining cannot hide latency.
+    \item \textbf{Node ordering cannot be controlled}. While training systems can use 
+    \item \textbf{No backpropagation leads to sampling and data loading dominating inference latency}. 
+\end{enumerate}
+
+Reasons why we optimize data lodaing stage
+\begin{enumerate}
+    \item \textbf{Data loading comprises 20-80\% of inference latency}
+    \item \item \textbf{Data loading latency cannot be hidden with pipelining}
+    \item \textbf{Data loading overhead scales with feature dimension}
+\end{enumerate}
 
 
-% Since this work's contributions primarily optimize the \textbf{data loading} stage, we give prior work targeting this stage a detailed treatment in Section \ref{Background: Data loading prior work}.
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{figures/GCN_latency_breakdown_gpu_sampled_with_cache.png}
+    
+    \caption{Inference latencies for different graph datasets and request batch sizes (number of target nodes in request). Requests are served by a system using GPU sampling and a static cache large enough to hold 20\% of the graph's node features.}
+    \label{GPU Sampling Latency Breakdown}
+\end{figure}    
 
-% The \textbf{feature gather} and \textbf{CPU-GPU copy} stages comprise the \textit{data loading} step, which is the general process of moving features to the GPU.
-
-% In a training setting the set of target nodes would be a minibatch, and the model execution step would include backpropagation. 
-% In the inference setting, the set of target nodes come from inference requests, and the model execution step only includes the forward pass.
