@@ -1,8 +1,10 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Design}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-Our system leverages a novel approach to dynamic cache updates to serve GNN inference requests with low-latency. 
-We target single-machine, multi-GPU inference systems and build upon caching techniques in GNN training systems discussed in the previous chapter. 
+Our system leverages a novel approach for efficient dynamic cache updates for improved inference latency and throughput.
+We design a single-machine, multi-GPU inference system and build upon caching techniques in GNN training systems discussed in the previous chapter. 
+By focusing on single-machine inference, we can avoid network overheads and achieve better latency and throughput than distributed systems when graph size is appropriate.
+
 In this chapter, we address three key research questions:
 \\ \\
 \noindent \textbf{RQ1: How can GPU feature caches effectively capture GNN inference patterns?} \\
@@ -29,14 +31,14 @@ We define a \textit{dynamic} cache policy as one that swaps node features in and
 \begin{description}
     \item[Inference request locality] Inference requests generate large neighborhoods during the $k$-hop neighborhood generation process. Due to this, if inference requests being "close" in the graph have reasonable semantic meaning in the real world, then we can expect inference requests to exhibit locality. For example, in a social network graph there may be clusters of users who are in a similar geographic area. These users may have more activity and generate more inference requests during the daytime, meaning that subgraphs become "hot" at different points in time. Prior work in the graph processing space has also noted the importance of request locality in domains such as traffic prediction or knowledge graph mining \cite{QGraph_2018}.
     % For example [traffic], [over time], [popular products]
-    \item[Sampling patterns] Since GNNs require $k$-hop neighborhoods, a policy that caches node features based solely on node out-degree can neglect nodes that are actually likely to be used. For example, a low-degree node that is directly adjacent to several high-degree nodes is likely to be similarly "hot" to its high-degree neighbors. Additionally, certain GNN architectures leverage specific parameters when building neighborhoods, such as by assigning edge weights [cite edge weight].
+    \item[Sampling patterns] A degree-based policy only attempts to approximate the likelihood of encountering a node during inference. For example, a low-degree node that is directly adjacent to several high-degree nodes is likely to be similarly "hot" to its high-degree neighbors, due to GNNs requiring multi-hop neighborhoods. Additionally, certain GNN architectures may sample node neighbors using some other heuristics, such as sampling based on edge weight[todo cite edge weight].
 \end{description}
 
-\subsection{Why Traditional Dynamic Caches are Ineffective}
+\subsection{Why Traditional Dynamic Caches are Ineffective} \label{Design: strawman}
 An intuitive first step towards dynamic caches is to consider using traditional cache eviction policies such as LRU, LFU, or FIFO. However, many of these approaches have too much overhead to be effective for GNN inference. 
 
 In the GNN inference case, each request (comprising anywhere from one to several hundred target nodes) can generate $k$-hop neighborhoods of hundreds of thousands of nodes.
-As a result, the overhead of cache replacement heuristics can quickly overtake any performance gains from improved cache hit rates. For example, the traditional implementation of an LRU cache using a linked list and hash table to track elements will severely bottleneck GNN inference. Consider the following back of the envelope calculation. We find that a naive GNN inference system can generally serve requests with $< 100$ ms latency. Assuming a cache put or get takes only $500$ ns, as is the case with many publicly available LRU cache implementations [todo cite https://github.com/hashicorp/golang-lru], for one request this requires $~100,000 \text{ nodes} * ~500 \text{ ns} = 50 \text{ ms}$. Given that this would add at least $50\%$ to our original inference latency, such overhead is clearly unacceptable. 
+As a result, the overhead of cache replacement heuristics can quickly overtake any performance gains from improved cache hit rates. For example, the traditional implementation of an LRU cache using a linked list and hash table to track elements will severely bottleneck GNN inference. Consider the following back of the envelope calculation. We find that a naive GNN inference system can generally serve requests with $< 100$ ms latency. Assuming a cache put or get takes only $500$ ns, as is the case with many publicly available LRU cache implementations \cite{HashiCorp_GoLang_LRU}, for one request this requires $~100,000 \text{ nodes} * ~500 \text{ ns} = 50 \text{ ms}$. Given that this would add at least $50\%$ to our original inference latency, such overhead is clearly unacceptable. 
 
 To handle potentially huge neighborhood sizes, a key requirement for a cache policy is to be easily parallelizable. A frequency-based heuristic meets this criteria and has been shown to be effective in the GNN setting a training time, with GNNLab's pre-sampling approach \cite{GNNLab_2022}. Even so, the traditional LFU policy can still struggle versus a static cache baseline as it requires some kind of sorting or top-$k$ operation for each request served.
 
@@ -128,13 +130,15 @@ Using this profiling information, we motivate three design decisions.
 %     \item Also experimented with updating counts/doing other operations in C++ thread
 % \end{enumerate}
 
-\subsection{Computing Cache Candidates}
+\subsection{Computing Cache Candidates} \label{Design: Cache candidates}
 To support moving features into the cache only when they are needed by inference requests while adhering to the desired policy, we introduce the idea of \textit{cache candidates}, a set of node ids computed every $k$ requests. When a cache miss occurs and new node features are copied to the GPU from host memory, the new features are checked against the set of cache candidates. If a feature corresponds to a node that is a cache candidate, then it will replace a non-cache candidate present in the cache. This is possible since at any given point in time, the number of cache candidates is equal to the size of the cache.
 
 
-
 \subsection{Performing Cache Updates}
-The actual cache update itself is handled by a separate host thread and CUDA stream than the one handling inference requests. 
+Cache metadata updates actually comprise the majority of the tail latency we are trying to avoid. 
+The main metadata update is simply correctly computing which indices of the cache correspond to new features and correctly updating another tensor that maps node ids to their index in the cache.
+
+We perform these metadata-related operations, along with the cache replacement described in the previous section, in separate host thread than the one handling inference requests. 
 
 One important aspect of this approach is that the cache update should occur during the model forward pass.
 The key insight is that node features are already present in GPU memory for the model forward pass and thus are assumed to fit in GPU memory fine.
@@ -154,7 +158,7 @@ Consider the case where we would like our system to be pipelined to maximize thr
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.85\textwidth]{figures/Pipeline no lock.png}
-    \caption{[todo Lock conflict p99 latency]}
+    \caption{Ideal pipelining with potential race condition}
     \label{Impl: Conflict pipeline}
 \end{figure}     
 A case such as the one illustrated in Figure \ref{Impl: Conflict pipeline} can lead to cache readers reading the wrong feature from the cache if a cache update changes the cache buffer before the reader completes. 
@@ -164,14 +168,14 @@ A naive approach is to use mutual exclusion, such as with a reader-writer lock, 
 \begin{figure}[h!]
     \centering
     \includegraphics[width=\textwidth]{figures/Pipeline with lock.png}
-    \caption{[todo Lock conflict p99 latency]}
+    \caption{Pipeline stall due to enforcement of mutual exclusion between cache update and data loading stages}
     \label{Impl: Contended pipeline}
 \end{figure}    
 
 Even with a read-preferring or write-preferring reader-writer lock, eventually it must be the case that a cache read waits for a cache update, causing this "latency passing" behavior.  
 
 \subsection{Masked Updates}
-Motivated by the key observation that readers should be wait-free but writers can wait, we introduce a novel alternative to mutual exclusion in this situation. In our approach, which we call \textit{masking}, cache updates preemptively \textit{mask away} cache entries from cache readers and only perform updates once these cache entries will no longer be used by readers. 
+Motivated by the key observation that readers should be wait-free but writers can wait, we introduce a novel alternative to mutual exclusion in this context. In our approach, which we call \textit{masking} cache updates, update threads preemptively \textit{mask away} cache entries from cache readers and only perform updates once these cache entries will no longer be used by readers. 
 
 Note that we assume only one thread performs a cache update at a time (per GPU), which is enforced by a simple mutex per GPU. If a cache update thread fails to acquire the lock, the update is thrown away.
 
@@ -253,8 +257,14 @@ Figure \ref{Design: Lock-free update diagram} provides a concrete example of thi
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Multi-GPU Cache Sharing} \label{Design: Multi-GPU}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-We extend our solution to support a single logical feature cache that is shared among multiple 
+To maximize usage of available GPU memory, we support sharing of a single logical cache shared among multiple GPUs when connected by NVLink.
+We use a simple hash partitioning scheme to partition node ids among multiple GPU caches. This means a node's feature can only ever be present in a single GPU's cache.
 
-say how fast NVLink is
+BGL implements a similar shared cache solution, but serializes all reads and writes to a particular GPU in a single thread to avoid synchronization problems. However, with the lock-free cache update solution described in the previous section, we allow for unlimited concurrent readers for any GPU's cache at a given time. The only restriction is that there can only be a single cache update in progress per GPU at a time.
 
-[todo finish]
+Enabling lock-free updates is particularly important in the multi-GPU case, as every request must gather node features in a single GPU using peer to peer transfers during the data loading phase. With naive locking, this could lead to blocking on $n$ cache updates, where $n$ is the number of GPUs in the system. However, with the masked cache update approach, these peer to peer transfers will never be blocked.
+
+
+% say how fast NVLink is
+
+% [todo finish]

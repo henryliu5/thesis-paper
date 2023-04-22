@@ -1,3 +1,13 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Conclusion}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+In this work we demonstrate how dynamic feature caching can effectively be applied to GNN inference systems. We show that a frequency-based admission and eviction policy can outperform existing solutions, such as caching by vertex degree or using LFU. We then propose appropriate mechanisms to implement this cache policy without impacting latency, by using a \textit{cache candidate} abstraction and performing update operations in a separate host thread.
+Our system further supports sharing a single logical cache across multiple GPUs, and we propose a lock-free algorithm for performing cache updates to avoid lock contention between cache readers and writers.
+
+\section{Future Work}
+There are still several avenues to improve GNN inference by reducing data loading overheads. We list a few here:
+\begin{enumerate}
+    \item \textbf{Feature compression for PCIe transfers:} To further reduce PCIe bottlenecks, node features can be compressed either offline or on-the-fly, and then copied to GPU memory in a compressed format. Decompression can take place on the GPU, which is extremely efficient \cite{NVComp}.
+    \item \textbf{Efficient out-of-core inference using GPUDirect Storage:} While our system assumes that graph structure and features fit in a single host's memory, this may not be the case. Single machine inference has the nice property of avoiding network transfers, and we can still support larger scale graphs by storing graphs on disk. GPUDirect Storage \cite{GDS} enables direct movement of data from NVMe SSDs to GPU memory, avoiding a redundant bounce in host memory.
+    \item \textbf{Implement more efficient pipelining:} While our InferenceEngine abstraction enables concurrent handling of inference requests by spawning more processes that sequentially perform sampling, data loading, and model execution, a different architecture with finer grain parallelism between these stages may yield higher throughput. A key challenge in implementing this efficiently is managing Python's Global Interpreter Lock and avoiding redundant copies between stages.
+\end{enumerate}

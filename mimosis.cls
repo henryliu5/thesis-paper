@@ -2,7 +2,7 @@
 \ProvidesClass{mimosis}[2017/08/01 Minimal modern thesis class]
 
 \PassOptionsToPackage{
-  DIV  = 12,    % TODO: Make configurable
+  DIV  = 16,    % TODO: Make configurable
   % DIV  = calc,    % TODO: Make configurable
   % BCOR = 10mm,  % TODO: Make configurable
 }{typearea}

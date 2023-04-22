@@ -7,7 +7,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 Given a graph containing nodes, edges, and features, Graph Neural Networks (GNNs) output a per-node \textit{embedding} for each node in the graph.
 An embedding is a $d$-dimensional representation of aggregated feature information from a node's neighborhood. 
-Similarity in the embedding space has different meaning based on the learning task, such as similarity of node type (a node classification task) or likelihood of edge existence (a link prediction task) [todo cite]. 
+Similarity in the embedding space has different meaning based on the learning task, such as similarity of node type (a node classification task) \cite{GCN_2016} or likelihood of edge existence (a link prediction task) \cite{LinkPredictionGNN_2018}. 
 
 % In this work we will consider the case where graphs are homogeneous (one node type) and only nodes have associated features.
 
@@ -130,13 +130,24 @@ Since GNN models have relatively few parameters compared to traditional DNNs, GP
 \end{description}
 
 \subsection{GNN Inference Challenges}
-Leveraging approaches from existing training systems present several key challenges, namely:
+We observe that after adopting the GPU sampling and static caching techniques from GNN training systems, inference latency is still dominated by data loading operations. Figure \ref{GPU Sampling Latency Breakdown} illustrates these results. 
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/GCN_latency_breakdown_gpu_sampled_with_cache.png}
+    
+    \caption{Inference latencies for different graph datasets and request batch sizes (number of target nodes in request). Requests are served by a system using GPU sampling and a static cache large enough to hold 20\% of each graph dataset's node features. The test platform is detailed in Section \ref{Eval: Test hardware}}
+    \label{GPU Sampling Latency Breakdown}
+\end{figure}    
+
+
+GNN inference has unique challenges that make it critical to carefully apply optimizations. In particular,
 
 \begin{enumerate}
-    \item \textbf{Latency is a key metric at inference time}. This is not the case during training. During training, throughput is a far more important metric than latency. For example, many training systems avoid data loading bottlenecks using pipelining. However, pipelining cannot hide latency.
-    \item \textbf{Node ordering cannot be controlled}. While training systems can use 
-    \item \textbf{No backpropagation leads to sampling and data loading dominating inference latency}. 
+    \item \textbf{Latency is a key metric at inference time}. During GNN training, throughput is far more important than latency. For example, many training systems try to hide data loading overheads by pipelining additional compute during data transfers. However, pipelining cannot hide latency. As a result, an efficient inference system must directly reduce data loading overhead.
+    \item \textbf{Model computation is much faster during inference}. At inference time there is no need to perform backpropagation, meaning that sampling and data loading comprise a larger percentage of inference latency. Furthermore, modern deep learning frameworks such as PyTorch \cite{PyTorch_2019} and TensorFlow \cite{tensorflow2015-whitepaper} offer optimizations that can be enabled at inference time, such as not tracking gradients, which skews this proportion further.
 \end{enumerate}
+
 
 % Reasons why we optimize data lodaing stage
 % \begin{enumerate}
@@ -145,12 +156,4 @@ Leveraging approaches from existing training systems present several key challen
 %     \item \textbf{Data loading overhead scales with feature dimension}
 % \end{enumerate}
 
-
-\begin{figure}[h!]
-    \centering
-    \includegraphics[width=0.8\textwidth]{figures/GCN_latency_breakdown_gpu_sampled_with_cache.png}
-    
-    \caption{Inference latencies for different graph datasets and request batch sizes (number of target nodes in request). Requests are served by a system using GPU sampling and a static cache large enough to hold 20\% of each graph dataset's node features.}
-    \label{GPU Sampling Latency Breakdown}
-\end{figure}    
 
