@@ -2,16 +2,6 @@
 \chapter{Evaluation} \label{Evaluation}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% \begin{center}
-%   \begin{minipage}{0.5\textwidth}
-%     \begin{small}
-%       In which the reasons for creating this package are laid bare for the
-%       whole world to see and we encounter some usage guidelines.
-%     \end{small}
-%   \end{minipage}
-%   \vspace{0.5cm}
-% \end{center}
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Experimental Setup}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -68,22 +58,20 @@
     \caption{[todo throughput]}
     \label{Eval: Hit Rate}
 \end{figure}    
-
-\subsection{Throughput}
-
-\begin{figure}[h!]
-    \centering
-    \includegraphics[width=\textwidth]{figures/throughput_GCN_bias_0.8_pinnedc0.2_gpus_2.png}
-    \caption{[todo throughput]}
-    \label{Eval: Throughput}
-\end{figure}    
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Locking vs. Lock-free}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 Figure \ref{Eval: Throughput} compares the throughput of our system using different cache replacement policies and mechanisms.
-...
+
+\subsection{Throughput}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/throughput_GCN_bias_0.8_pinnedc0.2_gpus_2.png}
+    \caption{Peak throughput using two GPUs and varying number of InferenceEngines per GPU,}
+    \label{Eval: Throughput}
+\end{figure}    
 
 Although there is little discernable difference in throughput between the lock-free and R/W lock approaches, there is an impact on P99 latency. Figure \ref{Eval: P99 latency} demonstrates these differences.
 Note the log scale.

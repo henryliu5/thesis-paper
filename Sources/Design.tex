@@ -14,17 +14,6 @@ Section \ref{Design: Async Update} details how we derive an asynchronous cache u
 \noindent \textbf{RQ3: How can we effectively leverage concurrency (multithreading, multi-GPU) to produce scalable inference?} \\
 Since asynchronous updates synchronized using naive locking can produce blocking behaviors when pipelined (and thus no longer be truly asynchronous), we propose a lock-free mechanism to perform cache updates, discussed in Section \ref{Design: Lock-free}.
 Lastly, Section \ref{Design: Multi-GPU} describes how we extend our system to support multiple GPUs connected by NVLinks and share a single logical cache.
-% \subparagraph{\mtol} abc
-% \subparagraph{Or with less text} abc
-% \subparagraph{\mtol} abc
-% \subparagraph{\mtol} abc
-
-% \begin{description}
-%     \item[RQ1: How can GPU feature caches effectively capture GNN inference patterns?]
-%     \item[RQ2: How can the impact of dynamic cache updates on request-response latency be minimized?]
-%     \item[RQ3: How can we effectively leverage concurrency (multithreading, multi-GPU) to produce \newline scalable inference?]
-%     % interconnects in multi-GPU systems (e.g. NVLink) be effectively leveraged for scalable inference?
-% \end{description}
 
 % Our system implements the same frequency-based admission and eviction policy from the prefetching baseline but combines it with an asynchronous cache update mechanism to reduce tail latencies. 
 % Section \ref{Design: Policy} analyzes this policy in more detail and Section \ref{Design: Async Update} describes how asynchronous updates take place. 
@@ -65,12 +54,12 @@ Note that static caches do not suffer from these performance problems since chec
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 Motivated by our observations in the previous section, in this section we propose a simple frequency-based cache admission and eviction policy. Then, we briefly illustrate the improved cache hit rates of this policy when using a naive, strawman cache update mechanism.
 
-The goal of our policy is straightforward: to admit the most frequently occuring node features and evict the least frequent node features. 
+The goal of our policy is straightforward: to admit the most frequently occurring node features and evict the least frequent node features within a particular time window. Implementing this heuristic requires tracking node frequencies and decaying them over time.
 
 In our implementation node frequencies are tracked in a buffer in GPU memory. By tracking frequencies on the GPU rather than the host, our system avoids an additional device to host copy, since computation graphs are built on GPU. The frequency buffer has length equal to the number of nodes in the graph.
 Each index in the buffer corresponds to a node, and the value is a counter that gets incremented whenever the node's feature is required.
-To reduce memory usage, this buffer uses only one byte for each node. 
-However, the size of the buffer still scales with the number of nodes in the graph. We note that frequencies can also be tracked using a probabilistic data structure like a counting bloom filter or count-min sketch, but we do not implement this.
+To reduce GPU memory usage, this buffer uses only one byte for each node. 
+However, the size of the buffer still scales with the number of nodes in the graph. We note that frequencies can also be tracked using a probabilistic data structure like a counting bloom filter \cite{Bloom_Filter_2000} or count-min sketch \cite{CountMinSketch_2005}, but we do not implement this.
 Using such a probabilistic data structure actually makes it easier to add new nodes into the graph, since there is no buffer that needs to be resized.
 We leave this as future work.
 
@@ -79,80 +68,28 @@ This is implemented by periodically dividing all counts in the buffer by two, a 
 A nice property of exponential decay is that it is easy to bound the maximum possible count and fit it within the one byte constraint. 
 Additionally, the decay can be implemented as a bit shift for better performance and still works with a count-min sketch or counting bloom filter.
 
-There are many policy choices regarding how exactly to choose which nodes to evict or admit. 
-For example, a policy could weight both a node's degree as well as its recent frequency when making admission decisions. 
-The weighting of node degree versus frequency is a user-adjustable knob in our system, but for the evaluation in Chapter \ref{Evaluation}, we use only frequency when evaluating frequency-based approaches.
+% There are many policy choices regarding how exactly to choose which nodes to evict or admit. 
+% For example, a policy could weight both a node's degree as well as its recent frequency when making admission decisions. 
+% The weighting of node degree versus frequency is a user-adjustable knob in our system, but for the evaluation in Chapter \ref{Evaluation}, we use only frequency when evaluating frequency-based approaches.
 
 
 \subsection{Strawman Prefetching Mechanism}
-Given the above policy, an actual implementation must choose some mechanism by which to perform cache updates and perform the frequency calculations. For example, LFU is traditionally implemented by tracking frequency using a heap and evicting/admitting into the cache per-request, but as we saw earlier this can negatively harm inference latency. We present an alternative strawman mechanism essentially replaces the static cache with a new one every $k$ requests according to the above policy. We call this alternative baseline mechanism our \textit{prefetching} strawman. 
+Given the above policy, an actual implementation must choose some mechanism by which to perform cache updates and perform the top-$k$ frequency calculations. For example, LFU is traditionally implemented by tracking most common elements using a heap and evicting/admitting into the cache per-request; however, as we saw earlier this can harm inference latency. We present an alternative strawman mechanism essentially replaces the static cache with a new one every $k$ requests according to the above policy. We call this alternative baseline mechanism our \textit{prefetching} strawman. 
 
 In particular, every $k$ requests the cache is entirely replaced with the most common nodes that appeared in the previous $k$ requests. This means that node features are pulled to the GPU feature cache and request handling must be paused as necessary. 
 
-The key insight with this strawman is that while for most requests it maintains the low overhead nature of a static cache with improved cache hit rates, but every $k$ requests it incurs a large penalty due to a cache update. This cache update penalty produces significant tail latency, which we analyze in the next section.
-% \subsection{Policy Evaluation}
-% \begin{figure}[h!]
-%     \begin{minipage}[c]{0.5\textwidth}
-%         \centering
-%         % \includegraphics[width=0.85\textwidth]{diagrams/group_meeting_gnn-Graph structure.png}    
-%         % \caption{Graph structure and associated node features (colored bars).}
-%     \end{minipage}
-%     \hfill
-%     \begin{minipage}[c]{0.45\textwidth}
-%         \centering
-%         % \includegraphics[width=0.95\textwidth]{diagrams/group_meeting_gnn-GNN Execution.png}
-%         % \caption{2-hop neighborhood and computation graph for node $A$, ignoring self loops.}
-%     \end{minipage}
-%     \caption{Cache hit rates for the }
-%     \label{Design: Static, LFU, Prefetch Hit Rates}
-% \end{figure}    
-
-
-% \begin{figure}[h!]
-%     \begin{minipage}[c]{0.5\textwidth}
-%         \centering
-%         % \includegraphics[width=0.85\textwidth]{diagrams/group_meeting_gnn-Graph structure.png}    
-%         % \caption{Graph structure and associated node features (colored bars).}
-%     \end{minipage}
-%     \hfill
-%     \begin{minipage}[c]{0.45\textwidth}
-%         \centering
-%         % \includegraphics[width=0.95\textwidth]{diagrams/group_meeting_gnn-GNN Execution.png}
-%         % \caption{2-hop neighborhood and computation graph for node $A$, ignoring self loops.}
-%     \end{minipage}
-%     % \caption{Graph and associated computation graph for node $A$.}
-%     \label{Design: Static, LFU, Prefetch CDF}
-% \end{figure}    
-
-
-% Our system implements a cache admission and eviction policy that uses frequency as its only feature. The goal is simple: to admit the most frequent node features and evict the least frequent node features. This is the policy used by the prefetch update mechanism describes in Section [todo ref baseline], and we elaborate on the Design here.
-
-% Node frequencies are tracked in a buffer in GPU memory. By tracking frequencies on the GPU rather than the host, our system avoids an additional device to host copy, since computation graphs are built on GPU. The frequency buffer has length equal to the number of nodes in the graph.
-% Each index in the buffer corresponds to a node, and the value is a counter that gets incremented whenever the node's feature is required.
-% To reduce memory usage, this buffer uses only one byte for each node. 
-% However, the size of the buffer still scales with the number of nodes in the graph. We note that frequencies can also be tracked using a probabilistic data structure like a counting bloom filter or count-min sketch, but we do not implement this.
-% Using such a probabilistic data structure actually makes it easier to add new nodes into the graph, since there is no buffer that needs to be resized.
-% We leave this as future work.
-
-% To capture changes in node frequencies, the count buffer must decay over time.
-% This is implemented by periodically dividing all counts in the buffer by two, a technique adapted from TinyLFU \cite{TinyLFU_2014} which produces exponential decay.
-% A nice property of exponential decay is that it is easy to bound the maximum possible count and fit it within the one byte constraint. 
-% Additionally, the decay can be implemented as a bit shift for better performance and still works with a count-min sketch or counting bloom filter.
-
-% There are many policy choices regarding how exactly to choose which nodes to evict or admit. 
-% For example, a policy could weight both a node's degree as well as its recent frequency when making admission decisions. 
-% The weighting of node degree versus frequency is a user-adjustable knob in our system, but for the evaluation in Section \ref{Evaluation}, we use only frequency when evaluating frequency-based approaches.
+The key idea is that this strawman maintains the low overhead nature of a static cache while improving cache hit rates, but every $k$ requests it incurs a large penalty due to a cache update. This cache update penalty produces significant tail latency, which we analyze in the next section.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Asynchronous Cache Update mechanism} \label{Design: Async Update}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
  
 To eliminate tail latencies associated with the prefetching strawman, our system uses an asynchronous cache update mechanism, moving cache update operations off the critical path when responding to inference requests.
-Table \ref{Update latencies} provides a breakdown of average cache update overheads for a selected dataset, ogbn-products, during a single-threaded inference execution.
+Table \ref{Update latencies} provides a breakdown of average cache update overheads for a selected dataset, ogbn-products, during a single-threaded inference execution. The prefetching-based update produces significant tail latency, in this case increasing response latency by more than a third when the update occurs.
 
 \begin{table}[h!]
     \begin{center}
-        \textbf{Breakdown of Cache Update Overhead}
+        \textbf{Breakdown of Average Cache Update Overhead}
         \begin{tabular}{|c c c|} 
         \hline
         \textbf{Operation} & \textbf{Time (ms)} & \textbf{Percent of Update Time} \\ [0.5ex] 
@@ -167,8 +104,10 @@ Table \ref{Update latencies} provides a breakdown of average cache update overhe
         \hline
         Total & 5.7 & \\
         \hline
-        \end{tabular}
+        \end{tabular} \\
+        Average inference latency without update: 12.7 ms
     \end{center}
+    
     % ogbn-products, uniform sampling, batch size 256, total latency 
     \caption{Breakdown of time spent on operations when performing cache update.
     These are the operations that contribute to significant tail latency with the prefetching policy.
@@ -190,7 +129,9 @@ Using this profiling information, we motivate three design decisions.
 % \end{enumerate}
 
 \subsection{Computing Cache Candidates}
-To enable \textbf{(1)} moving features into the cache only when they are needed by inference requests while adhering to the desired policy, we introduce the idea of \textit{cache candidates}, a set of node ids computed every $k$ requests. When a cache miss occurs and new node features are copied to the GPU from host memory, they are checked against the set of cache candidates. If a feature corresponds to a node that is a cache candidate, then it will a non-cache candidate present in the cache. This is possible since at any given point in time, the number of cache candidates is equal to the size of the cache.
+To support moving features into the cache only when they are needed by inference requests while adhering to the desired policy, we introduce the idea of \textit{cache candidates}, a set of node ids computed every $k$ requests. When a cache miss occurs and new node features are copied to the GPU from host memory, the new features are checked against the set of cache candidates. If a feature corresponds to a node that is a cache candidate, then it will replace a non-cache candidate present in the cache. This is possible since at any given point in time, the number of cache candidates is equal to the size of the cache.
+
+
 
 \subsection{Performing Cache Updates}
 The actual cache update itself is handled by a separate host thread and CUDA stream than the one handling inference requests. 
@@ -209,44 +150,105 @@ To further avoid contention of GPU compute due to cache updates happening concur
 Asynchronous cache updates naturally raise concerns about correctness and performance due to concurrency. While naive locking may initially be adequate, at scale this may not be the case. In this section we look at a novel lock-free approach using \textit{masking} to avoid lock contention due to cache updates.
 
 
-Consider the case where we would like our system to be pipelined to maximize throughput. Since the data loading stage requires reading from the cache, we must be careful about synchronization between cache updates and data loading. 
-A naive approach is to use mutual exclusion, but this can lead asynchronous updates having equivalent performance to the original synchronous variety. Figure \ref{Impl: Contended pipeline} illustrates this effect. In this example, by enforcing mutual exclusion between the data loading thread and cache update thread, the second inference request is forced to wait on the cache update from the first inference request, meaning the latency of the first cache update was simply "passed along".
-
+Consider the case where we would like our system to be pipelined to maximize throughput. Since the data loading stage requires reading from the cache, we must be careful about synchronization between cache updates and data loading since cache updates are not atomic.
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.85\textwidth]{figures/Pipeline no lock.png}
+    \caption{[todo Lock conflict p99 latency]}
+    \label{Impl: Conflict pipeline}
+\end{figure}     
+A case such as the one illustrated in Figure \ref{Impl: Conflict pipeline} can lead to cache readers reading the wrong feature from the cache if a cache update changes the cache buffer before the reader completes. 
+
+A naive approach is to use mutual exclusion, such as with a reader-writer lock, but this can lead to asynchronous updates having equivalent performance to the original synchronous variety. Figure \ref{Impl: Contended pipeline} illustrates this effect. In this example, by enforcing mutual exclusion between the data loading thread and cache update thread, the second inference request is forced to wait on the cache update from the first inference request, meaning the latency of the first cache update was simply "passed along".
+
+\begin{figure}[h!]
+    \centering
     \includegraphics[width=\textwidth]{figures/Pipeline with lock.png}
     \caption{[todo Lock conflict p99 latency]}
     \label{Impl: Contended pipeline}
 \end{figure}    
 
+Even with a read-preferring or write-preferring reader-writer lock, eventually it must be the case that a cache read waits for a cache update, causing this "latency passing" behavior.  
+
 \subsection{Masked Updates}
-To our cache data structures we add a \textit{mask} tensor, which indicates for each node in the graph whether it is present in the cache or not. 
+Motivated by the key observation that readers should be wait-free but writers can wait, we introduce a novel alternative to mutual exclusion in this situation. In our approach, which we call \textit{masking}, cache updates preemptively \textit{mask away} cache entries from cache readers and only perform updates once these cache entries will no longer be used by readers. 
 
-Readers
-\begin{enumerate}
-    \item Increment atomic
-    \item Check cache mask
-    \item Perform cache reading
-    \item Increment atomic
-\end{enumerate}
+Note that we assume only one thread performs a cache update at a time (per GPU), which is enforced by a simple mutex per GPU. If a cache update thread fails to acquire the lock, the update is thrown away.
 
-writers
-\begin{enumerate}
-    \item Write 0 to cache mask
-    \item Check atomics
-    \item Wait on atomics
-    \item Perform cache update
-    \item Write 1 to cache mask
-\end{enumerate}
+To perform masked updates, we first add a \textit{mask} tensor to our cache metadata, which indicates for each node in the graph whether it is present in the cache (1 for present, 0 for not).
+
+Then, for each logical thread of execution in the system, we initialize a start and finish atomic integer that just tracks whether the thread is currently performing a cache read.
+When reading from the cache, threads will first increment their respective start atomic and then check the cache mask and only look in the cache for node ids where the mask indicates it is present.
+Once the cache read is finished, the finish atomic is incremented.
+Algorithm \ref{Design: Alg: Cache Read} summarizes this procedure.
+
+When a cache update needs to occur, the writer will first blind write zeros into the cache mask for any node ids that will be evicted from the cache. 
+Once the blind write has completed, the writer will then capture the value of all start atomics.
+The writer capturing these values serves as a linearization point, as the writer will wait on the finish atomics until any in progress reads complete. 
+At this point the cache writer is certain that any cache indices that will be replaced are no longer in use by any cache readers.
+Algorithm \ref{Design: Alg: Cache Write} summarizes this procedure.
+
+
+% declaration of the new block
+\algblock{ParFor}{EndParFor}
+% customising the new block
+\algnewcommand\algorithmicparfor{\textbf{parallel for}}
+\algnewcommand\algorithmicpardo{\textbf{do}}
+\algnewcommand\algorithmicendparfor{\textbf{end\ parallel for}}
+\algrenewtext{ParFor}[1]{\algorithmicparfor\ #1\ \algorithmicpardo}
+\algrenewtext{EndParFor}{\algorithmicendparfor}
+
+\begin{minipage}{0.4\textwidth}
+    \begin{algorithm}[H]
+        \centering
+        \caption{Cache Read} \label{Design: Alg: Cache Read}
+        \footnotesize
+        \begin{algorithmic}[1]
+        \Procedure{Read}{$node\_ids$}
+            \State $i \gets \text{ Reader thread id}$
+            \State $S[i] \gets S[i] + 1$
+            \ParFor{$node\_id \in ids$}
+                \If{$mask[node\_id] = 1$}
+                    \State Do cache read for $node\_id$
+                \EndIf
+            \EndParFor
+            \State $F[i] \gets F[i] + 1$
+        \EndProcedure
+        
+        \end{algorithmic}
+    \end{algorithm}
+\end{minipage}
+\hfill
+\begin{minipage}{0.5\textwidth}
+        \begin{algorithm}[H]
+            \centering
+            \caption{Cache Write} \label{Design: Alg: Cache Write}
+            \footnotesize
+            \begin{algorithmic}[1]
+            \Procedure{Update}{$admit\_nids, evict\_nids$}
+                \State $mask[evict\_nids] = 0$
+                \For{$reader\_id \in reader\_ids$}
+                    \State $s'[reader\_id] \gets s[reader\_id]$
+                \EndFor
+                \While{$\exists id \in reader\_ids : s'[id] < f[id]$}
+                    \State Wait
+                \EndWhile
+                \State Do cache update
+                \State $mask[admit\_nids] = 1$
+            \EndProcedure
+            
+            \end{algorithmic}
+        \end{algorithm}
+\end{minipage}
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{diagrams/group_meeting_gnn-Multi-GPU.png}
+    \includegraphics[width=0.7\textwidth]{diagrams/group_meeting_gnn-Multi-GPU.png}
     
-    \caption{Readers and writers with lock-free cache update}
+    \caption{Readers and writers with masked, lock-free cache update}
     \label{Design: Lock-free update diagram}
 \end{figure}    
+Figure \ref{Design: Lock-free update diagram} provides a concrete example of this mechanism in a system with four threads of execution. At time $a$, the writer thread will capture the start atomics of each of the readers and wait for Reader 1 and Reader 2 to finish. At time $b$, the writer thread can start the cache update. Note that there is no actual conflict between Reader 3 and the writer thread since Reader 3 will have observed the initial cache mask update of the writer. However, Reader 3 may be subject to some false negatives as a result. Once the write procedure completes at time $c$ completes, the newly updated cache features are now globally visible.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Multi-GPU Cache Sharing} \label{Design: Multi-GPU}
@@ -255,7 +257,4 @@ We extend our solution to support a single logical feature cache that is shared 
 
 say how fast NVLink is
 
-\begin{enumerate}
-    \item Mention pinned memory buffer reused between requests, show pinned mem vs pagable mem graph
-    \item 
-\end{enumerate}
+[todo finish]
