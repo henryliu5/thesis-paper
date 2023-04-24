@@ -80,17 +80,19 @@ For example, in a traffic forecasting application, an inference request can be a
 \subsection{GNN Inference Stages}
 While online GNN inference is generally understudied, it shares many similarities with GNN mini-batch training (discussed in Section \ref{Background: Relation to training}). Thus when understanding the steps required to perform GNN inference, we use established taxonomy from mini-batch training work \cite{PaGraph_2020}\cite{GNNLab_2022}\cite{P3_2021}. We break down the stages of GNN inference as follows:
 
+\begin{enumerate}
+    \item \textbf{Sampling:} Construct $k$-hop neighborhood for target nodes and build logical computation graph describing GNN computation.
+    \item \textbf{Data Loading:} Moving necessary data to GPU, comprising two steps.
+    \begin{enumerate}
+        \item \textbf{Feature gather:} Gather node features corresponding to $k$-hop neighborhood in contiguous CPU buffer.
+        \item \textbf{CPU-GPU copy:} Copy buffer with node features and computation graph to GPU.
+    \end{enumerate}
+    \item \textbf{Model execution:} Perform GNN computation on GPU.
+\end{enumerate}
+These stages are illustrated in FIgure \ref{Compute Visualization}.
+
 \begin{figure}[h!!!]
     \centering
-    \begin{enumerate}
-        \item \textbf{Sampling:} Construct $k$-hop neighborhood for target nodes and build logical computation graph describing GNN computation.
-        \item \textbf{Data Loading:} Moving necessary data to GPU, comprising two steps.
-        \begin{enumerate}
-            \item \textbf{Feature gather:} Gather node features corresponding to $k$-hop neighborhood in contiguous CPU buffer.
-            \item \textbf{CPU-GPU copy:} Copy buffer with node features and computation graph to GPU.
-        \end{enumerate}
-        \item \textbf{Model execution:} Perform GNN computation on GPU.
-    \end{enumerate}
     \includegraphics[width=\textwidth]{figures/Compute example.png}
     
     \caption{Online GNN Inference}
@@ -140,13 +142,14 @@ We observe that after adopting the GPU sampling and static caching techniques fr
     \label{GPU Sampling Latency Breakdown}
 \end{figure}    
 
-
-GNN inference has unique challenges that make it critical to carefully apply optimizations. In particular,
+We identify key challenges with GNN inference it critical to carefully apply data loading optimizations. In particular,
 
 \begin{enumerate}
     \item \textbf{Latency is a key metric at inference time}. During GNN training, throughput is far more important than latency. For example, many training systems try to hide data loading overheads by pipelining additional compute during data transfers. However, pipelining cannot hide latency. As a result, an efficient inference system must directly reduce data loading overhead.
-    \item \textbf{Model computation is much faster during inference}. At inference time there is no need to perform backpropagation, meaning that sampling and data loading comprise a larger percentage of inference latency. Furthermore, modern deep learning frameworks such as PyTorch \cite{PyTorch_2019} and TensorFlow \cite{tensorflow2015-whitepaper} offer optimizations that can be enabled at inference time, such as not tracking gradients, which skews this proportion further.
+    \item \textbf{Data loading is the key inference bottleneck}. As Figure \ref{GPU Sampling Latency Breakdown} shows, the data loading step is the bottleneck in terms of inference latency. This is actually mostly inference-specific, since at inference time there is no need to perform backpropagation, meaning that sampling and data loading comprise a larger percentage of inference latency. Furthermore, modern deep learning frameworks such as PyTorch \cite{PyTorch_2019} and TensorFlow \cite{tensorflow2015-whitepaper} offer optimizations that can be enabled at inference time, such as not tracking gradients, which skews this proportion further.
 \end{enumerate}
+
+As a result, we believe it is important to reduce data loading overheads by improving GPU feature caches.
 
 
 % Reasons why we optimize data lodaing stage
