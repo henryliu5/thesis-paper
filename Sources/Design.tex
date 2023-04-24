@@ -1,5 +1,5 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Design}
+\chapter{Design} \label{Design}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 Our system leverages a novel approach for efficient dynamic cache updates for improved inference latency and throughput.
 We design a single-machine, multi-GPU inference system and build upon caching techniques in GNN training systems discussed in the previous chapter. 
@@ -31,7 +31,7 @@ We define a \textit{dynamic} cache policy as one that swaps node features in and
 \begin{description}
     \item[Inference request locality] Inference requests generate large neighborhoods during the $k$-hop neighborhood generation process. Due to this, if inference requests being "close" in the graph have reasonable semantic meaning in the real world, then we can expect inference requests to exhibit locality. For example, in a social network graph there may be clusters of users who are in a similar geographic area. These users may have more activity and generate more inference requests during the daytime, meaning that subgraphs become "hot" at different points in time. Prior work in the graph processing space has also noted the importance of request locality in domains such as traffic prediction or knowledge graph mining \cite{QGraph_2018}.
     % For example [traffic], [over time], [popular products]
-    \item[Sampling patterns] A degree-based policy only attempts to approximate the likelihood of encountering a node during inference. For example, a low-degree node that is directly adjacent to several high-degree nodes is likely to be similarly "hot" to its high-degree neighbors, due to GNNs requiring multi-hop neighborhoods. Additionally, certain GNN architectures may sample node neighbors using some other heuristics, such as sampling based on edge weight[todo cite edge weight].
+    \item[Sampling patterns] A degree-based policy only attempts to approximate the likelihood of encountering a node during inference. For example, a low-degree node that is directly adjacent to several high-degree nodes is likely to be similarly "hot" to its high-degree neighbors, due to GNNs requiring multi-hop neighborhoods. Additionally, certain GNN architectures may sample node neighbors using some other heuristics, such as sampling based on edge weight \cite{GAT_2018}.
 \end{description}
 
 \subsection{Why Traditional Dynamic Caches are Ineffective} \label{Design: strawman}

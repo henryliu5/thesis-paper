@@ -117,7 +117,7 @@ In our system we will leverage this GPU sampling approach.
 
 Prior GNN training works have observed that data loading can also be a significant bottleneck.
 Bus bandwidth between host memory and GPUs can easily be saturated by GNN dataloading. 
-For reference, PCIe 3.0 16x and PCIe 4.0 16x unidirectional bandwidth is 16 GB/s and 32 GB/s respectively [todo cite].
+For reference, PCIe 3.0 16x and PCIe 4.0 16x unidirectional bandwidth is 16 GB/s and 32 GB/s respectively.
 Meanwhile, given exponential neighborhood sizes and large feature dimensions, it is easy for transfers of several hundred megabytes to be required for each minibatch.
 Therefore, gathering these features in CPU memory and copying them to the GPU can bottleneck training pipelines.
 
