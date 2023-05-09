@@ -8,7 +8,7 @@ By focusing on single-machine inference, we can avoid network overheads and achi
 In this chapter, we address three key research questions:
 \\ \\
 \noindent \textbf{RQ1: How can GPU feature caches effectively capture GNN inference patterns?} \\
-Section \ref{Design: Towards Dynamic Caching} describes opportunities for dynamic caches to outperform existing static caches at inference time and highlights shortcomings of naive approaches. Section \ref{Design: Policy} proposes a frequency-based cache admission and eviction policy that produces better cache hit rates that static baselines while offering a path towards efficient update operations.
+Section \ref{Design: Towards Dynamic Caching} describes opportunities for dynamic caches to outperform existing static caches at inference time and highlights the shortcomings of naive approaches. Section \ref{Design: Policy} proposes a frequency-based cache admission and eviction policy that produces better cache hit rates than static baselines while offering a path toward efficient update operations.
 \\ \\
 \noindent \textbf{RQ2: How can the impact of dynamic cache updates on request-response latency be minimized?} \\
 Section \ref{Design: Async Update} details how we derive an asynchronous cache update mechanism based on profiling of a naive cache update mechanism using "prefetching". By carefully engineering this asynchronous cache update, we are able to hide cache update operations that would otherwise negatively impact tail latency.
@@ -38,9 +38,9 @@ We define a \textit{dynamic} cache policy as one that swaps node features in and
 An intuitive first step towards dynamic caches is to consider using traditional cache eviction policies such as LRU, LFU, or FIFO. However, many of these approaches have too much overhead to be effective for GNN inference. 
 
 In the GNN inference case, each request (comprising anywhere from one to several hundred target nodes) can generate $k$-hop neighborhoods of hundreds of thousands of nodes.
-As a result, the overhead of cache replacement heuristics can quickly overtake any performance gains from improved cache hit rates. For example, the traditional implementation of an LRU cache using a linked list and hash table to track elements will severely bottleneck GNN inference. Consider the following back of the envelope calculation. We find that a naive GNN inference system can generally serve requests with $< 100$ ms latency. Assuming a cache put or get takes only $500$ ns, as is the case with many publicly available LRU cache implementations \cite{HashiCorp_GoLang_LRU}, for one request this requires $~100,000 \text{ nodes} * ~500 \text{ ns} = 50 \text{ ms}$. Given that this would add at least $50\%$ to our original inference latency, such overhead is clearly unacceptable. 
+As a result, the overhead of cache replacement heuristics can quickly overtake any performance gains from improved cache hit rates. For example, the traditional implementation of an LRU cache using a linked list and hash table to track elements will severely bottleneck GNN inference. Consider the following back-of-the-envelope calculation. We find that a naive GNN inference system can generally serve requests with $< 100$ ms latency. Assuming a cache put or get takes only $500$ ns, as is the case with many publicly available LRU cache implementations \cite{HashiCorp_GoLang_LRU}, for one request this requires $~100,000 \text{ nodes} * ~500 \text{ ns} = 50 \text{ ms}$. Given that this would add at least $50\%$ to our original inference latency, such overhead is clearly unacceptable. 
 
-To handle potentially huge neighborhood sizes, a key requirement for a cache policy is to be easily parallelizable. A frequency-based heuristic meets this criteria and has been shown to be effective in the GNN setting a training time, with GNNLab's pre-sampling approach \cite{GNNLab_2022}. Even so, the traditional LFU policy can still struggle versus a static cache baseline as it requires some kind of sorting or top-$k$ operation for each request served.
+To handle potentially huge neighborhood sizes, a key requirement for a cache policy is to be easily parallelizable. A frequency-based heuristic meets this criterion and has been shown to be effective in the GNN setting a training time, with GNNLab's pre-sampling approach \cite{GNNLab_2022}. Even so, the traditional LFU policy can still struggle versus a static cache baseline as it requires some kind of sorting or top-$k$ operation for each request served.
 
 Furthermore, large neighborhood sizes require us to also consider a cache admission policy. If only a cache eviction policy is used, it is easy for a "one-hit wonder" to be brought in among hundreds of thousands of other nodes and waste cache space.
 
@@ -76,7 +76,7 @@ Additionally, the decay can be implemented as a bit shift for better performance
 
 
 \subsection{Strawman Prefetching Mechanism}
-Given the above policy, an actual implementation must choose some mechanism by which to perform cache updates and perform the top-$k$ frequency calculations. For example, LFU is traditionally implemented by tracking most common elements using a heap and evicting/admitting into the cache per-request; however, as we saw earlier this can harm inference latency. We present an alternative strawman mechanism essentially replaces the static cache with a new one every $k$ requests according to the above policy. We call this alternative baseline mechanism our \textit{prefetching} strawman. 
+Given the above policy, an actual implementation must choose some mechanism by which to perform cache updates and perform the top-$k$ frequency calculations. For example, LFU is traditionally implemented by tracking the most common elements using a heap and evicting/admitting into the cache per-request; however, as we saw earlier this can harm inference latency. We present an alternative strawman mechanism that essentially replaces the static cache with a new one every $k$ requests according to the above policy. We call this alternative baseline mechanism our \textit{prefetching} strawman. 
 
 In particular, every $k$ requests the cache is entirely replaced with the most common nodes that appeared in the previous $k$ requests. This means that node features are pulled to the GPU feature cache and request handling must be paused as necessary. 
 
@@ -138,7 +138,7 @@ To support moving features into the cache only when they are needed by inference
 Cache metadata updates actually comprise the majority of the tail latency we are trying to avoid. 
 The main metadata update is simply correctly computing which indices of the cache correspond to new features and correctly updating another tensor that maps node ids to their index in the cache.
 
-We perform these metadata-related operations, along with the cache replacement described in the previous section, in separate host thread than the one handling inference requests. 
+We perform these metadata-related operations, along with the cache replacement described in the previous section, in a separate host thread than the one handling inference requests. 
 
 One important aspect of this approach is that the cache update should occur during the model forward pass.
 The key insight is that node features are already present in GPU memory for the model forward pass and thus are assumed to fit in GPU memory fine.
@@ -188,7 +188,7 @@ Algorithm \ref{Design: Alg: Cache Read} summarizes this procedure.
 
 When a cache update needs to occur, the writer will first blind write zeros into the cache mask for any node ids that will be evicted from the cache. 
 Once the blind write has completed, the writer will then capture the value of all start atomics.
-The writer capturing these values serves as a linearization point, as the writer will wait on the finish atomics until any in progress reads complete. 
+The writer capturing these values serves as a linearization point, as the writer will wait on the finish atomics until any in-progress reads complete. 
 At this point the cache writer is certain that any cache indices that will be replaced are no longer in use by any cache readers.
 Algorithm \ref{Design: Alg: Cache Write} summarizes this procedure.
 
@@ -262,7 +262,7 @@ We use a simple hash partitioning scheme to partition node ids among multiple GP
 
 BGL implements a similar shared cache solution, but serializes all reads and writes to a particular GPU in a single thread to avoid synchronization problems. However, with the lock-free cache update solution described in the previous section, we allow for unlimited concurrent readers for any GPU's cache at a given time. The only restriction is that there can only be a single cache update in progress per GPU at a time.
 
-Enabling lock-free updates is particularly important in the multi-GPU case, as every request must gather node features in a single GPU using peer to peer transfers during the data loading phase. With naive locking, this could lead to blocking on $n$ cache updates, where $n$ is the number of GPUs in the system. However, with the masked cache update approach, these peer to peer transfers will never be blocked.
+Enabling lock-free updates is particularly important in the multi-GPU case, as every request must gather node features in a single GPU using peer-to-peer transfers during the data loading phase. With naive locking, this could lead to blocking on $n$ cache updates, where $n$ is the number of GPUs in the system. However, with the masked cache update approach, these peer-to-peer transfers will never be blocked.
 
 
 % say how fast NVLink is

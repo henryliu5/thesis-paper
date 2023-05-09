@@ -29,13 +29,13 @@ Borrowing notation from P3 \cite{P3_2021}, we can generally represent the embedd
     N(v) &= \text{Neighborhood of node v}
 \end{align*}
 $\mathtt{AGG}^{(k)}$ is a function that aggregates the previous layer embeddings of node $v$'s neighborhood. 
-$\mathtt{COMBINE}^{(k)}$ is a function that combines that the result of $\mathtt{AGG}^{(k)}$ with the $v$'s own last layer embedding. 
+$\mathtt{COMBINE}^{(k)}$ is a function that combines the result of $\mathtt{AGG}^{(k)}$ with $v$'s own last layer embedding. 
 The first layer embedding for node $v$, $h_k^0$, is just its original features.
 
-The choice of $\mathtt{AGG}^{(k)}$ and $\mathtt{COMBINE}^{(k)}$ are depend on specific GNN architecture. Graph Convolutional Networks (GCN) \cite{GCN_2016}, GraphSAGE \cite{GraphSAGE_2017}, and Graph Attention Networks (GAT) \cite{GAT_2018} perform different types of aggregations and operations on features, but share the same general aggregation principle.
+The choice of $\mathtt{AGG}^{(k)}$ and $\mathtt{COMBINE}^{(k)}$ depend on the specific GNN architecture. Graph Convolutional Networks (GCN) \cite{GCN_2016}, GraphSAGE \cite{GraphSAGE_2017}, and Graph Attention Networks (GAT) \cite{GAT_2018} perform different types of aggregations and operations on features but share the same general aggregation principle.
 
 Since for each layer there is a different $W^k$, GNNs are comprised of $k$ neural networks. Furthermore, each layer requires recursive computation on a node's neighbors. Thus a \textit{$k$-hop neighborhood} must be constructed to run a $k$-layer GNN.
-Generally GNNs use 1-5 layers, with 2 layers being a de facto standard \cite{Survey_First_2022}. However, some architectures can use significantly more layers, such as the current SOTA EnGCN model comprising 8 layers \cite{EnGCN_2023}.
+Generally, GNNs use 1-5 layers, with 2 layers being a de facto standard \cite{Survey_First_2022}. However, some architectures can use significantly more layers, such as the current SOTA EnGCN model comprising 8 layers \cite{EnGCN_2023}.
 Figure \ref{Background: GNN Execution Example} illustrates the construction of a \textit{computation graph} for a $2$-layer GNN. A computation graph describes how necessary nodes and edges participate in GNN computation.
 
 
@@ -60,12 +60,12 @@ Figure \ref{Background: GNN Execution Example} illustrates the construction of a
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % [todo define what inference is?]
 Traditionally, GNN inference has been viewed as an \textit{offline} problem, where inference is performed on all nodes in the graph (full graph inference).
-Full graph inference is typically used for evaluating trained models or computing node embeddings for future lookup. 
+Full graph inference is typically used for evaluating trained models or computing node embeddings for future lookups. 
 For example, PinSage \cite{Recsys_PinSAGE_2018} first uses MapReduce \cite{MapReduce_2004} to perform full graph inference before storing all node embeddings in a database.
 Then, PinSage uses $K$-nearest neighbors to compute embeddings for new queries, enabling it to serve online recommendation requests.
 However, this approach, along with other nearest neighbor approaches, suffers from a loss in accuracy compared to directly using a GNN to compute the new embedding.
 
-Therefore, in this work we will view GNN inference as a \textit{online} problem, where a GNN is given a request to compute an embedding for a node or batch of nodes. In this setting, requests consist of nodes, their features, and edges connecting them into the existing graph.
+Therefore, in this work we will view GNN inference as an \textit{online} problem, where a GNN is given a request to compute an embedding for a node or batch of nodes. In this setting, requests consist of nodes, their features, and edges connecting them to the existing graph.
 
 In this section we motivate this online inference formulation and present a concrete taxonomy of the stages of GNN inference.
 
@@ -89,7 +89,7 @@ While online GNN inference is generally understudied, it shares many similaritie
     \end{enumerate}
     \item \textbf{Model execution:} Perform GNN computation on GPU.
 \end{enumerate}
-These stages are illustrated in FIgure \ref{Compute Visualization}.
+These stages are illustrated in Figure \ref{Compute Visualization}.
 
 \begin{figure}[h!!!]
     \centering
@@ -110,23 +110,23 @@ This is as opposed to full graph training, where node embeddings and gradients a
 Mini-batch training is analogous to online inference, and, aside from the high-level goal, the difference is that no backpropagation is needed for inference. We briefly look at prior optimizations for the sampling and data loading stages, with particular emphasis on the latter.
 
 \subsubsection{Sampling Optimizations}
-The \textit{neighborhood explosion} problem is a well known issue in the sampling stage.
-Since the size of $k$-hop neighborhoods are inherently exponential, constructing these neighborhood and corresponding computation graphs can be expensive. \textit{Neighborhood sampling} helps alleviate this problem by randomly selecting a fixed number or percentage of node neighbors during the sampling stage \cite{GraphSAGE_2017}. 
+The \textit{neighborhood explosion} problem is a well-known issue in the sampling stage.
+Since the size of $k$-hop neighborhoods is inherently exponential, constructing these neighborhood and corresponding computation graphs can be expensive. \textit{Neighborhood sampling} helps alleviate this problem by randomly selecting a fixed number or percentage of node neighbors during the sampling stage \cite{GraphSAGE_2017}. 
 However, since this can produce a drop in model accuracy, works such as NextDoor \cite{NextDoor_2021} have proposed performing sampling on GPU rather than CPU, yielding significant speedups.
 In our system we will leverage this GPU sampling approach.
 
 \subsubsection{Data Loading Optimizations}
 
 Prior GNN training works have observed that data loading can also be a significant bottleneck.
-Bus bandwidth between host memory and GPUs can easily be saturated by GNN dataloading. 
+Bus bandwidth between host memory and GPUs can easily be saturated by GNN data loading. 
 For reference, PCIe 3.0 16x and PCIe 4.0 16x unidirectional bandwidth is 16 GB/s and 32 GB/s respectively.
 Meanwhile, given exponential neighborhood sizes and large feature dimensions, it is easy for transfers of several hundred megabytes to be required for each minibatch.
 Therefore, gathering these features in CPU memory and copying them to the GPU can bottleneck training pipelines.
 
-Since GNN models have relatively few parameters compared to traditional DNNs, GPU compute and memory can actually be underutilized during training. Thus several works have proposed caching node features in GPU memory so they no longer need to be copied over from host memory. We are particularly interested in these following GNN training systems implementing feature caches, since we find that data loading is a several bottleneck during inference.
+Since GNN models have relatively few parameters compared to traditional DNNs, GPU compute and memory can actually be underutilized during training. Thus several works have proposed caching node features in GPU memory so they no longer need to be copied over from host memory. We are particularly interested in the following GNN training systems implementing feature caches since we find that data loading is a several bottleneck during inference.
 
 \begin{description}
-    \item[PaGraph \cite{PaGraph_2020}] introduces \textit{static feature caching}, proposing a policy where the features of the highest degree nodes in the graph are stored on the GPU prior to training. This cache is \textit{static} since these features features remain permanently in GPU memory until training concludes. A static cache can be used for inference and is low overhead, but has worse cache hit rates than dynamic caches.
+    \item[PaGraph \cite{PaGraph_2020}] introduces \textit{static feature caching}, proposing a policy where the features of the highest degree nodes in the graph are stored on the GPU prior to training. This cache is \textit{static} since these features remain permanently in GPU memory until training concludes. A static cache can be used for inference and is low overhead, but has worse cache hit rates than dynamic caches.
     \item[GNNLab \cite{GNNLab_2022}] extends static caching to include a pre-sampling phase, where warmup epochs are run to determine what nodes are most often used and thus should be stored in the cache. Although the pre-sampling approach cannot be directly applied to inference, we build upon the idea of using frequency as a feature for determining cache residents in Section \ref{Design: Policy}.
     \item[BGL \cite{BGL_2023}] uses a dynamic FIFO cache and iterates over the graph in a roughly-BFS manner to exploit the FIFO cache. BGL's approach is reliant on controlling the node order during training time and thus cannot be applied to inference. However, BGL does introduce using NVLinks between GPUs to share cache resources, which we improve upon by enabling greater concurrency in Sections \ref{Design: Multi-GPU} and \ref{Design: Lock-free}.
 \end{description}
@@ -142,7 +142,7 @@ We observe that after adopting the GPU sampling and static caching techniques fr
     \label{GPU Sampling Latency Breakdown}
 \end{figure}    
 
-We identify key challenges with GNN inference it critical to carefully apply data loading optimizations. In particular,
+We identify key challenges with GNN inference, making it critical to carefully apply data loading optimizations. In particular,
 
 \begin{enumerate}
     \item \textbf{Latency is a key metric at inference time}. During GNN training, throughput is far more important than latency. For example, many training systems try to hide data loading overheads by pipelining additional compute during data transfers. However, pipelining cannot hide latency. As a result, an efficient inference system must directly reduce data loading overhead.

@@ -6,7 +6,7 @@ We conduct several experiments to understand the latency and throughput of our s
 \begin{enumerate}
     \item Our approach using asynchronous, lock-free cache updates can improve end-to-end inference latency up to 28\%. Our frequency-based admission and eviction policy can outperform LFU in terms of cache hit rate, and our asynchronous update mechanism can avoid additional overheads.
     \item By splitting a logical cache among GPUs connected by NVLink, our system's throughput can scale linearly with the number of GPUs in the system.
-    \item Our lock-free approach improves P99 latency over naive locking using a reader-write lock. While we don't see a noticable improvement in peak throughput when using locking vs. lock-free, a microbenchmark in Section \ref{Eval: microbenchmark} highlights how lock contention worsens as the number of GPUs in the system increase.
+    \item Our lock-free approach improves P99 latency over naive locking using a reader-write lock. While we don't see a noticeable improvement in peak throughput when using locking vs. lock-free, a microbenchmark in Section \ref{Eval: microbenchmark} highlights how lock contention worsens as the number of GPUs in the system increase.
 \end{enumerate}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -49,7 +49,7 @@ Since our optimizations are orthogonal to model performance, we conduct experime
 \subsection{Policies Evaluated}
 Throughout our evaluation we compare several combinations of cache policies and mechanisms, summarized in Table \ref{Eval: Policy names}. 
 The most important ones are in the first four rows. 
-The Frequency Lock-free approach is our approach as described in Chapter \ref{Design}, cache candidates computed every 10 requests, cache updates happening in a separate host thread, and cache synchronization handled using our lock-free, mask-based approach.
+The Frequency Lock-free approach is our approach as described in Chapter \ref{Design}, where cache candidates are computed every 10 requests, cache updates happen in a separate host thread, and cache synchronization is handled using our lock-free, mask-based approach.
 \begin{table}[h!]
     \begin{center}
         \begin{tabularx}{\textwidth}{|c X c X X|} 
@@ -99,7 +99,7 @@ We first examine best-case request-response latencies by using only one GPU and 
     \label{Eval: Speedups}
 \end{figure}    
 
-Figure \ref{Eval: Speedups} shows the speedup of our approach versus a static, degree-based policy for both uniform and subgraph biased requests. For the yelp and ogbn-products datasets, our approach has speedups ranging from $0-28\%$. Interestingly, since the reddit dataset is incredibly dense, the frequency-based cache update heuristic is not able to achieve better cache hit rates, and this we do not see any speedup for either inference trace.
+Figure \ref{Eval: Speedups} shows the speedup of our approach versus a static, degree-based policy for both uniform and subgraph biased requests. For the yelp and ogbn-products datasets, our approach has speedups ranging from $0-28\%$. Interestingly, since the reddit dataset is incredibly dense, the frequency-based cache update heuristic is not able to achieve better cache hit rates, and thus we do not see any speedup for either inference trace.
 
 The ogbn-papers100M dataset is challenging because of its scale and sparsity, along with small feature dimension. Furthermore, the data loading phase was not that large of a proportion of end-to-end latency in the first place, as shown in Figure \ref{GPU Sampling Latency Breakdown}. In this case, increasing the request batch size helps improve inference latency with the dynamic cache since the frequency signal is stronger.
 
@@ -144,19 +144,19 @@ Comparing LFU and the static baseline, we immediately see that LFU struggles in 
 
 Our Frequency Prefetch strawman has the best median latencies overall, since it produces the best cache hit rates and has the same minimal overhead as a static cache. However, in the uniform sampled case the tail latency is apparent, with the 90\th percentile latency increasingly significantly due to cache updates.
 
-The frequency-based \textit{admission} that the frequency-based policies use are crucial, as compared to LFU they offer better cache hit rates in general. While LFU can only match the static baseline cache hit rates in the uniform sampled case, adding the admission policy enables better cache hit rates even in this difficult case. 
+The frequency-based \textit{admission} that the frequency-based policies use is crucial, as compared to LFU it offers better cache hit rates in general. While LFU can only match the static baseline cache hit rates in the uniform sampled case, adding the admission policy enables better cache hit rates even in this difficult case. 
 
-When examining the Frequency Lock-Free and Frequency Synchronous approaches, they both exhibit relatively little tail latency as a result of the cache candidate mechanism discussed in Section \ref{Design: Cache candidates}. The Frequency Synchronous performs well relative to the static baseline, but is still 3-5\% slower on average, than our Frequency Lock-Free approach. Our Frequency Lock-Free approach is able to match the low-overhead median latencies of the Frequency Prefetch strawman with its asynchronous update mechanism. The time required to perform cache updates somewhat scales with the number of nodes in the graph, and thus the disparity between asynchronous and synchronous updates will increase with larger graphs.
+When examining the Frequency Lock-Free and Frequency Synchronous approaches, they both exhibit relatively little tail latency as a result of the cache candidate mechanism discussed in Section \ref{Design: Cache candidates}. The Frequency Synchronous performs well relative to the static baseline but is still 3-5\% slower on average, than our Frequency Lock-Free approach. Our Frequency Lock-Free approach is able to match the low-overhead median latencies of the Frequency Prefetch strawman with its asynchronous update mechanism. The time required to perform cache updates somewhat scales with the number of nodes in the graph, and thus the disparity between asynchronous and synchronous updates will increase with larger graphs.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Locking vs. Lock-free}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-As described in Section \ref{Design: Lock-free}, we expected that using a reader-writer lock with multiple InferenceEngines and GPUs would pose a problem for both throughput in latency. This is because cache updates would have a blocking effect on serving inference requests. To evaluate this hypothesis, we conduct several experiments comparing the Frequency Lock-free and Frequency R/W Lock policies in this section. We fix the cache size at 20\% of total graph features for all experiments.
+As described in Section \ref{Design: Lock-free}, we expected that using a reader-writer lock with multiple InferenceEngines and GPUs would pose a problem for both throughput and latency. This is because cache updates would have a blocking effect on serving inference requests. To evaluate this hypothesis, we conduct several experiments comparing the Frequency Lock-free and Frequency R/W Lock policies in this section. We fix the cache size at 20\% of total graph features for all experiments.
 
 \subsection{Throughput}
 We measure the maximum possible throughput of the Static, Frequency Prefetch, Frequency Lock-free, and Frequency R/W Lock approaches.
-Figure \ref{Eval: Throughput 1 GPU} shows these results using only 1 GPU and Figure \ref{Eval: Throughput 2 GPU} shows these results for 2 GPUs. In the 2 GPU case a single logical cache is partitioned between both GPUs.  
+Figure \ref{Eval: Throughput 1 GPU} shows these results using only 1 GPU and Figure \ref{Eval: Throughput 2 GPU} shows these results for 2 GPUs. In the 2 GPU case, a single logical cache is partitioned between both GPUs.  
 
 Comparing these two cases, we observe that doubling the number of GPUs yields roughly linear speedup in terms of peak throughput. We do not have access to a system that has more GPUs all connected using NVLink/NVSwitch and thus do not evaluate scaling to more GPUs. Although we did have a system with four GPUs, only pairs of GPUs on different NUMA nodes were connected with NVLink. In such a situation it is better not to share a single logical cache among all GPUs, but rather have two separate caches for each pair of GPUs. Creating a logical cache between GPUs not connected using NVLink simply incurs more PCIe bus traffic.
 \begin{figure}[h!]
@@ -194,7 +194,7 @@ Comparing these two cases, we observe that doubling the number of GPUs yields ro
     \label{Eval: Throughput 2 GPU}
 \end{figure}   
 
-We found that there is actually little discernable difference in peak throughput between the lock-free and R/W lock approaches. Both of these approaches share the cache candidate mechanism, frequency-based admission and eviction, and asynchronous updates, and thus are able to outperform the static and Frequency Prefetch polices. We believe we did not see the throughput difference betwen the lock-free and reader writer lock approaches because of our InferenceEngine architecture. A throughput bottleneck would likely be observed if many data loaders were always trying to read from the cache, but with our architecture this only happens for a brief period of time per process. Thus there is not that much lock contention in the first place.
+We found that there is actually little discernable difference in peak throughput between the lock-free and R/W lock approaches. Both of these approaches share the cache candidate mechanism, frequency-based admission and eviction, and asynchronous updates, and thus are able to outperform the static and Frequency Prefetch polices. We believe we did not see the throughput difference between the lock-free and reader writer lock approaches because of our InferenceEngine architecture. A throughput bottleneck would likely be observed if many data loaders were always trying to read from the cache, but with our architecture this only happens for a brief period of time per process. Thus there is not that much lock contention in the first place.
 
 \subsection{P99 Latency}
 Although there is little impact of lock contention on peak throughput, there is an impact on P99 latency. We conducted an experiment where we varied the request rate, with delays between requests drawn from an exponential distribution, and measured the P99 latency for the same policies. Figure \ref{Eval: P99 latency} shows P99 latencies for these policies when the mean request rate varies. In this test we use both GPUs and eight InferenceEngines per GPU. Note the log scale.
